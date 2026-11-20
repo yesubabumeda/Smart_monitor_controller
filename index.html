@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Water Tank Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{--bg:#eef2f6;--panel:#fff;--ink:#16212e;--mute:#5d6b7c;--line:#d8e0e8;--blue:#1f6feb;--green:#1a9d57;--orange:#d98a00;--red:#d6372f;--grey:#8a97a6;--nav:#0f1b2b}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1420;--panel:#131f30;--ink:#e6edf5;--mute:#92a1b4;--line:#243449}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif;padding-bottom:env(safe-area-inset-bottom)}
+header{background:var(--nav);color:#fff;padding:calc(14px + env(safe-area-inset-top)) 22px 14px}
+header h1{margin:0;font-size:20px}header p{margin:3px 0 0;color:#aebccd;font-size:13px}
+main{max-width:1150px;margin:auto;padding:18px;display:grid;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+h2{font-size:16px;margin:0 0 10px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.two{display:grid;gap:16px;grid-template-columns:1fr 1fr}
+@media(max-width:820px){.two{grid-template-columns:1fr}}
+.k{color:var(--mute);font-size:13px}.v{font:600 26px ui-monospace,Consolas,monospace}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid;white-space:nowrap}
+.green{color:var(--green)}.orange{color:var(--orange)}.red{color:var(--red)}.grey{color:var(--mute)}.blue{color:var(--blue)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);align-items:center}
+.row:last-child{border-bottom:0}.row>span:first-child{color:var(--mute)}
+label{display:block;font-size:13px;color:var(--mute);margin:8px 0 3px}
+input,select{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+button{font:inherit;font-weight:600;padding:9px 16px;border:0;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer}
+button.red{background:var(--red)}button.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.note{font-size:13px;color:var(--mute)}
+.msg{min-height:20px;font-size:14px;margin-top:8px}.msg.ok{color:var(--green)}.msg.err{color:var(--red)}
+.warn{border-left:3px solid var(--orange);padding:8px 12px;font-size:14px;margin-top:10px;background:rgba(217,138,0,.08)}
+.motor{text-align:center;padding:22px;border:2px dashed var(--grey);border-radius:8px;font:600 22px ui-monospace,Consolas,monospace}
+.tankwrap{display:flex;justify-content:center;padding:6px}
+.tank{position:relative;width:150px;height:240px;border:5px solid #475569;border-radius:14px 14px 26px 26px;overflow:hidden;background:rgba(127,140,155,.15)}
+.water{position:absolute;bottom:0;width:100%;height:0;background:var(--blue);transition:height 1s ease,background .3s}
+.hatch{position:absolute;inset:0;background:repeating-linear-gradient(45deg,transparent 0 8px,rgba(93,139,214,.25) 8px 12px)}
+.tt{position:absolute;inset:0;display:grid;place-items:center;font:700 26px ui-monospace,monospace;color:#fff;text-shadow:0 1px 4px #000}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--red);margin-right:6px}.dot.on{background:var(--green)}
+@media(prefers-reduced-motion:reduce){.water{transition:none}}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><h1>Water Tank Dashboard</h1><p>ESP32 transmitter &middot; SX1262 LoRa &middot; ESP32 receiver &middot; EMQX MQTT</p></header>
+<main>
+
+<div class="card"><span class="dot" id="dot"></span><b id="conn">Not connected</b>
+  <span class="note"> &middot; <span id="fresh">no data yet</span></span></div>
+
+<div class="grid">
+  <div class="card"><div class="k">Distance (sensor to water)</div><div class="v"><span id="dist">--</span> cm</div></div>
+  <div class="card"><div class="k">Water level</div><div class="v"><span id="pct">--</span> %</div><div class="note" id="pctNote"></div></div>
+  <div class="card"><div class="k">Temperature</div><div class="v"><span id="temp">--</span> &deg;C</div></div>
+  <div class="card"><div class="k">Last live update</div><div class="v" style="font-size:20px" id="age">--</div></div>
+</div>
+
+<div class="two">
+  <div class="card"><h2>Tank</h2>
+    <div class="tankwrap"><div class="tank"><div class="hatch" id="hatch"></div><div class="water" id="water"></div><div class="tt" id="tt">--</div></div></div>
+    <div class="row"><span>Status</span><span id="lvlState" class="pill grey">no data</span></div>
+    <label for="full">Distance when tank is FULL (cm)</label><input id="full" type="number" min="3" max="450" placeholder="e.g. 25">
+    <label for="empty">Distance when tank is EMPTY (cm)</label><input id="empty" type="number" min="4" max="450" placeholder="e.g. 225">
+    <p class="note">Percentage is shown only after both values are set. Saved in this browser only.</p>
+  </div>
+
+  <div class="card"><h2>Devices</h2>
+    <div class="row"><span>Receiver status</span><span id="rxStatus" class="pill grey">unknown</span></div>
+    <div class="row"><span>Receiver mode</span><span id="rxMode" class="pill grey">unknown</span></div>
+    <div class="row"><span>Data source</span><span id="source">--</span></div>
+    <div class="row"><span>Wi-Fi transmitter status</span><span id="txWifi">--</span></div>
+    <p class="note">Not published by this firmware: LoRa RSSI/SNR, relay state, battery, command acknowledgements. Transmitter mode cannot be read back.</p>
+    <div id="retainedNote" class="warn" style="display:none">Showing a retained value from the broker. It is not live data.</div>
+  </div>
+</div>
+
+<div class="card"><h2>Motor control</h2>
+  <div class="motor" id="motorState">MOTOR STATUS UNKNOWN</div>
+  <p class="note" id="lastCmd">No command sent from this page. The receiver reports no relay feedback, so the real motor state cannot be shown.</p>
+  <div class="two">
+    <div><b>Manual</b><p class="note">Works in WIFI and LORA receiver modes.</p>
+      <div class="btns"><button id="bOn" class="red">Motor ON</button><button id="bOff" class="ghost">Motor OFF</button></div></div>
+    <div><b>Automatic</b><p class="note">ON when distance &ge; ON threshold, OFF when &le; OFF threshold, otherwise unchanged. Thresholds are set on the receiver's own setup page and cannot be read or changed here. LORA mode only.</p>
+      <div class="btns"><button id="bAuto">Enable AUTO</button><button id="bManual" class="ghost">Set MANUAL</button></div>
+      <div id="autoWhy" class="note"></div></div>
+  </div>
+  <div id="motorMsg" class="msg" role="status" aria-live="polite"></div>
+  <div class="warn">Motor commands use shared topics (<code>Motor/control</code>, <code>Motor/mode</code>). Every receiver on this broker account receives them. Changing the motor mode forces the relay OFF. &ldquo;Sent&rdquo; only means the broker accepted the message.</div>
+</div>
+
+<div class="card"><h2>Operating mode (Wi-Fi / LoRa)</h2>
+  <div class="two">
+    <div><b>Receiver</b><div class="btns"><button class="ghost" data-mode="Receiver/mode" data-val="WIFI">WIFI</button><button class="ghost" data-mode="Receiver/mode" data-val="LORA">LORA</button></div>
+      <p class="note">Confirmed when the receiver republishes its mode.</p></div>
+    <div><b>Transmitter</b><div class="btns"><button class="ghost" data-mode="Transmitter/mode" data-val="WIFI">WIFI</button><button class="ghost" data-mode="Transmitter/mode" data-val="LORA">LORA</button></div>
+      <p class="note">Delivered at the transmitter's next wake-up (about every 60 s plus cycle time). No confirmation is available.</p></div>
+  </div>
+  <div id="modeMsg" class="msg" role="status" aria-live="polite"></div>
+</div>
+
+<div class="card"><h2>MQTT connection</h2>
+  <p class="note">Browsers need the broker's secure WebSocket endpoint (EMQX Cloud: usually port 8084, path /mqtt), not the 8883 port the ESP32 uses. Create a separate dashboard user in EMQX; the password is typed here each time and not saved.</p>
+  <form id="f">
+    <label for="url">Secure WebSocket URL</label><input id="url" type="url" required placeholder="wss://xxxx.emqxsl.com:8084/mqtt">
+    <label for="user">Username</label><input id="user" autocomplete="username">
+    <label for="pass">Password</label><input id="pass" type="password" autocomplete="current-password">
+    <label for="tank">Tank name (as set on the receiver)</label><input id="tank" value="Tank_1" pattern="[A-Za-z0-9_\-]{1,32}" required>
+    <div class="btns"><button id="bConn" type="submit">Connect</button><button id="bDisc" type="button" class="ghost" disabled>Disconnect</button></div>
+  </form>
+  <div id="mqttMsg" class="msg" role="status" aria-live="polite"></div>
+  <p class="note" id="topicList"></p>
+</div>
+
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const DELAYED_S=150, STALE_S=300, MIN_GAP_MS=3000;
+let client=null, gen=0, tank='Tank_1', T={};
+const S={dist:null,distLive:0,temp:null,rxStatus:null,rxMode:null,source:null,retainedOnly:false,cmdMode:null,lastSend:0};
+
+const pill=(el,text,cls)=>{el.textContent=text;el.className='pill '+cls;el.style.borderColor='currentColor'};
+const say=(id,t,k)=>{const e=$(id);e.textContent=t;e.className='msg'+(k?' '+k:'')};
+const cal=()=>{const f=parseFloat($('full').value),e=parseFloat($('empty').value);return f>=3&&e>f?{f,e}:null};
+['full','empty'].forEach(k=>{$(k).value=localStorage.getItem('tank_'+k)||'';$(k).addEventListener('input',()=>{localStorage.setItem('tank_'+k,$(k).value);render()})});
+
+// Firmware publishes "0" for an invalid reading. Treat 0 / out of range as invalid, never as a measurement.
+const validDist=n=>Number.isFinite(n)&&n>=3&&n<=450;
+const validTemp=n=>Number.isFinite(n)&&n!==0&&n>=-40&&n<=125;
+
+function topics(t){return{
+  dist:t+'/Transmitter/Distance',temp:t+'/Transmitter/Temperature',rxStatus:t+'/Receiver/Status',rxMode:t+'/Receiver/Mode',
+  wDist:'Distance/water',wTemp:'Temperature/water',wStatus:'WiFi/status'}}
+
+function render(){
+  const age=S.distLive?Math.floor((Date.now()-S.distLive)/1000):null;
+  const state=age===null?'none':age<=DELAYED_S?'fresh':age<=STALE_S?'delayed':'stale';
+  $('age').textContent=age===null?'--':(age<90?age+' s ago':Math.round(age/60)+' min ago');
+  $('fresh').textContent={none:'no live data yet',fresh:'data fresh',delayed:'data delayed',stale:'data stale / offline'}[state];
+  $('fresh').className=state==='fresh'?'green':state==='delayed'?'orange':state==='stale'?'red':'';
+  const live=state==='fresh'||state==='delayed';
+  const d=live?S.dist:null;
+  $('dist').textContent=d!==null?d.toFixed(1):'--';
+  $('temp').textContent=live&&S.temp!==null?S.temp:'--';
+  const c=cal(); let p=null,st=['no data','grey'],col='#8a97a6';
+  if(!live){st=[state==='none'?'no data':'offline / stale','grey']}
+  else if(d===null){st=['sensor failure','red'];col='#d6372f'}
+  else if(!c){st=['not calibrated','grey']}
+  else if(d<c.f-5||d>c.e+5){st=['sensor fault (out of range)','red'];col='#d6372f'}
+  else{p=Math.max(0,Math.min(100,(c.e-d)/(c.e-c.f)*100));
+    if(p<=10){st=['critical low','red'];col='#d6372f'}else if(p<=20){st=['low','orange'];col='#d98a00'}
+    else if(p>=97){st=['critical high','red'];col='#d6372f'}else if(p>=90){st=['high','orange'];col='#d98a00'}
+    else{st=['normal','blue'];col='#1f6feb'}}
+  $('pct').textContent=p!==null?p.toFixed(1):'--';
+  $('pctNote').textContent=!c?'Set full/empty distances':'';
+  $('water').style.height=(p||0)+'%';$('water').style.background=col;
+  $('hatch').style.display=p===null?'block':'none';
+  $('tt').textContent=p!==null?p.toFixed(0)+'%':'--';
+  pill($('lvlState'),st[0],st[1]);
+  const rs=S.rxStatus;
+  pill($('rxStatus'),rs||'unknown',rs==='online'?'green':rs==='offline'?'red':rs==='config'?'orange':'grey');
+  pill($('rxMode'),S.rxMode||'unknown',S.rxMode==='LORA'?'blue':S.rxMode==='WIFI'?'blue':S.rxMode==='AP'?'orange':'grey');
+  $('source').textContent=S.source==='rx'?'LoRa → receiver → MQTT':S.source==='wifi'?'Transmitter Wi-Fi → MQTT':'--';
+  $('retainedNote').style.display=S.retainedOnly?'block':'none';
+  const on=client&&client.connected, rxOn=rs==='online';
+  $('bOn').disabled=!on||!rxOn;$('bOff').disabled=!on;$('bManual').disabled=!on;
+  const autoOk=on&&rxOn&&S.rxMode==='LORA';
+  $('bAuto').disabled=!autoOk;
+  $('autoWhy').textContent=autoOk?'AUTO is silently ignored by the firmware if thresholds are not saved on the receiver.':'AUTO unavailable: receiver must be online and in LORA mode.';
+  document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=!on);
+}
+
+function send(topic,payload,msgId,okText,after){
+  if(!client||!client.connected){say(msgId,'Not connected to MQTT.','err');return Promise.reject()}
+  return new Promise((res,rej)=>client.publish(topic,payload,{qos:1,retain:false},e=>{
+    if(e){say(msgId,'Publish failed: '+e.message,'err');rej(e)}else{say(msgId,okText,'ok');after&&after();res()}}));
+}
+function gap(msgId){const n=Date.now();if(n-S.lastSend<MIN_GAP_MS){say(msgId,'Wait a few seconds between commands.','err');return false}S.lastSend=n;return true}
+function note(t){$('lastCmd').textContent=t+' (sent to broker at '+new Date().toLocaleTimeString()+'; not verified)'}
+
+$('bOn').onclick=async()=>{
+  const first=S.cmdMode!=='MANUAL';
+  if(!confirm('Start the pump?'+(first?'\n\nThis first sets MANUAL mode, which forces the relay OFF, then sends ON.':'')+'\n\nCheck the tank yourself: the motor state cannot be confirmed.'))return;
+  if(!gap('motorMsg'))return;
+  try{
+    if(first){await send('Motor/mode','MANUAL','motorMsg','MANUAL sent...',()=>{S.cmdMode='MANUAL'});await new Promise(r=>setTimeout(r,1200))}
+    await send('Motor/control','ON','motorMsg','ON sent to broker. Device execution is not confirmed.',()=>note('Last command: ON'));
+  }catch(e){}
+};
+$('bOff').onclick=async()=>{
+  if(!confirm('Stop the pump?'))return; if(!gap('motorMsg'))return;
+  try{
+    if(S.cmdMode!=='MANUAL'){await send('Motor/mode','MANUAL','motorMsg','MANUAL sent...',()=>{S.cmdMode='MANUAL'});await new Promise(r=>setTimeout(r,1200))}
+    await send('Motor/control','OFF','motorMsg','OFF sent to broker. Device execution is not confirmed.',()=>note('Last command: OFF'));
+  }catch(e){}
+};
+$('bAuto').onclick=()=>{ if(!confirm('Switch to AUTO? The relay is forced OFF now and the receiver acts on the next LoRa reading.'))return; if(!gap('motorMsg'))return;
+  send('Motor/mode','AUTO','motorMsg','AUTO sent. The firmware gives no confirmation.',()=>{S.cmdMode='AUTO';note('Last command: AUTO mode')}).catch(()=>{})};
+$('bManual').onclick=()=>{ if(!confirm('Switch to MANUAL? The relay is forced OFF.'))return; if(!gap('motorMsg'))return;
+  send('Motor/mode','MANUAL','motorMsg','MANUAL sent. Relay is forced OFF by the firmware.',()=>{S.cmdMode='MANUAL';note('Last command: MANUAL mode')}).catch(()=>{})};
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
+  const t=b.dataset.mode,v=b.dataset.val;
+  if(!confirm('Change '+t.split('/')[0].toLowerCase()+' mode to '+v+'?'))return; if(!gap('modeMsg'))return;
+  send(t,v,'modeMsg',t.split('/')[0]+' '+v+' sent to broker.'+(t.startsWith('Receiver')?' Waiting for the receiver to report its mode.':' It arrives at the next transmitter wake-up.')).catch(()=>{});
+});
+
+$('f').addEventListener('submit',e=>{
+  e.preventDefault();
+  const url=$('url').value.trim();
+  if(!/^wss:\/\//i.test(url)){say('mqttMsg','Use a wss:// URL.','err');return}
+  if(client){const o=client;client=null;gen++;o.end(true)}
+  tank=$('tank').value.trim();T=topics(tank);
+  const g=++gen;
+  $('conn').textContent='Connecting...';say('mqttMsg','Connecting...');
+  const o={clientId:'tank-web-'+Math.random().toString(16).slice(2,10),clean:true,keepalive:30,connectTimeout:10000,reconnectPeriod:3000};
+  if($('user').value||$('pass').value){o.username=$('user').value.trim();o.password=$('pass').value}
+  try{client=mqtt.connect(url,o)}catch(x){say('mqttMsg',x.message,'err');return}
+  const c=client;
+  c.on('connect',()=>{if(g!==gen)return;$('conn').textContent='Connected to MQTT';$('dot').classList.add('on');$('bConn').disabled=true;$('bDisc').disabled=false;
+    const subs=[T.dist,T.temp,T.rxStatus,T.rxMode,T.wDist,T.wTemp,T.wStatus];
+    c.subscribe(subs,{qos:1},err=>say('mqttMsg',err?'Subscribe failed: '+err.message+' (check EMQX ACL)':'Subscribed to '+subs.length+' topics.',err?'err':'ok'));
+    $('topicList').textContent='Subscribed: '+subs.join(', ');render()});
+  const down=t=>()=>{if(g!==gen)return;$('conn').textContent=t;$('dot').classList.remove('on');$('bConn').disabled=false;$('bDisc').disabled=true;render()};
+  c.on('close',down('Disconnected'));c.on('offline',down('Offline'));
+  c.on('error',x=>{if(g!==gen)return;say('mqttMsg','MQTT error: '+x.message,'err')});
+  c.on('message',(topic,buf,pkt)=>{
+    if(g!==gen)return;
+    const v=buf.toString().trim(), retained=!!(pkt&&pkt.retain), now=Date.now();
+    if(topic===T.dist||topic===T.wDist){
+      const n=Number(v);S.dist=validDist(n)?n:null;S.source=topic===T.dist?'rx':'wifi';
+      if(retained){if(!S.distLive)S.retainedOnly=true}else{S.distLive=now;S.retainedOnly=false}
+    }else if(topic===T.temp||topic===T.wTemp){const n=Number(v);S.temp=validTemp(n)?n:null}
+    else if(topic===T.rxStatus){S.rxStatus=v.toLowerCase()}
+    else if(topic===T.rxMode){S.rxMode=v.toUpperCase()}
+    else if(topic===T.wStatus){$('txWifi').textContent=v+(retained?' (retained)':'')}
+    render();
+  });
+});
+$('bDisc').onclick=()=>{if(client){const o=client;client=null;gen++;o.end(true)}$('conn').textContent='Disconnected';$('dot').classList.remove('on');$('bConn').disabled=false;$('bDisc').disabled=true;say('mqttMsg','Disconnected.');render()};
+setInterval(render,1000);render();
+</script>
+</body>
+</html>
