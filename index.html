@@ -26,7 +26,8 @@ h2{font-size:16px;margin:0 0 10px}
 label{display:block;font-size:13px;color:var(--mute);margin:8px 0 3px}
 input,select{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 button{font:inherit;font-weight:600;padding:9px 16px;border:0;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer}
-button.red{background:var(--red)}button.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+button.red{background:#c9534d;color:#fff}button.red:disabled{background:#c9534d}
+button.ghost.active{background:var(--green);color:#fff;border-color:var(--green)}button.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
 button:disabled{opacity:.45;cursor:not-allowed}
 .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 .note{font-size:13px;color:var(--mute)}
@@ -98,9 +99,9 @@ button.eye:hover{color:var(--ink)}
 <div class="card"><h2>Operating mode (Wi-Fi / LoRa)</h2>
   <div class="two">
     <div><b>Receiver</b><div class="btns"><button class="ghost" data-mode="Receiver/mode" data-val="WIFI">WIFI</button><button class="ghost" data-mode="Receiver/mode" data-val="LORA">LORA</button><button class="ghost" data-mode="Receiver/mode" data-val="AP">AP</button></div>
-      <p class="note">Confirmed when the receiver republishes its mode. AP starts the receiver's setup access point and it may disconnect from MQTT.</p></div>
+      <p class="note">The green button is the mode the receiver reports. AP starts the receiver's setup access point and it may disconnect from MQTT.</p></div>
     <div><b>Transmitter</b><div class="btns"><button class="ghost" data-mode="Transmitter/mode" data-val="WIFI">WIFI</button><button class="ghost" data-mode="Transmitter/mode" data-val="LORA">LORA</button><button class="ghost" data-mode="Transmitter/mode" data-val="AP">AP</button></div>
-      <p class="note">Delivered at the transmitter's next wake-up (about every 60 s plus cycle time). No confirmation is available. AP starts the transmitter's setup access point, so it stops sending data.</p></div>
+      <p class="note">Delivered at the transmitter's next wake-up (about every 60 s plus cycle time). No confirmation is available, so the green button is the last mode sent from this browser. AP starts the transmitter's setup access point, so it stops sending data.</p></div>
   </div>
   <div id="modeMsg" class="msg" role="status" aria-live="polite"></div>
 </div>
@@ -125,7 +126,8 @@ button.eye:hover{color:var(--ink)}
 const $=id=>document.getElementById(id);
 const DELAYED_S=150, STALE_S=300, MIN_GAP_MS=3000;
 let client=null, gen=0, tank='Tank_1', T={};
-const S={dist:null,distLive:0,temp:null,rxStatus:null,rxMode:null,source:null,retainedOnly:false,cmdMode:null,lastSend:0};
+let txSaved=null;try{txSaved=localStorage.getItem('tx_mode')}catch(x){}
+const S={txMode:txSaved,dist:null,distLive:0,temp:null,rxStatus:null,rxMode:null,source:null,retainedOnly:false,cmdMode:null,lastSend:0};
 
 const pill=(el,text,cls)=>{el.textContent=text;el.className='pill '+cls;el.style.borderColor='currentColor'};
 const say=(id,t,k)=>{const e=$(id);e.textContent=t;e.className='msg'+(k?' '+k:'')};
@@ -195,7 +197,12 @@ function render(){
   const autoOk=on&&rxOn&&S.rxMode==='LORA';
   $('bAuto').disabled=!autoOk;
   $('autoWhy').textContent=autoOk?'AUTO is silently ignored by the firmware if thresholds are not saved on the receiver.':'AUTO unavailable: receiver must be online and in LORA mode.';
-  document.querySelectorAll('[data-mode]').forEach(b=>b.disabled=!on);
+  document.querySelectorAll('[data-mode]').forEach(b=>{
+    b.disabled=!on;
+    const cur=b.dataset.mode.startsWith('Receiver')?S.rxMode:S.txMode;
+    const act=cur===b.dataset.val;
+    b.classList.toggle('active',act);b.setAttribute('aria-pressed',String(act));
+  });
 }
 
 function send(topic,payload,msgId,okText,after){
@@ -230,7 +237,8 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
   const t=b.dataset.mode,v=b.dataset.val;
   const apWarn=v==='AP'?'\n\nAP mode opens the device\'s setup access point. It will stop reporting to MQTT until you switch it back from its own setup page or restart it.':'';
   if(!confirm('Change '+t.split('/')[0].toLowerCase()+' mode to '+v+'?'+apWarn))return; if(!gap('modeMsg'))return;
-  send(t,v,'modeMsg',t.split('/')[0]+' '+v+' sent to broker.'+(t.startsWith('Receiver')?' Waiting for the receiver to report its mode.':' It arrives at the next transmitter wake-up.')).catch(()=>{});
+  send(t,v,'modeMsg',t.split('/')[0]+' '+v+' sent to broker.'+(t.startsWith('Receiver')?' Waiting for the receiver to report its mode.':' It arrives at the next transmitter wake-up.'),
+    t.startsWith('Transmitter')?()=>{S.txMode=v;try{localStorage.setItem('tx_mode',v)}catch(x){}render()}:undefined).catch(()=>{});
 });
 
 // Show / hide password toggle
