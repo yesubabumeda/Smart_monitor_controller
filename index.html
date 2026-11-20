@@ -40,6 +40,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .tt{position:absolute;inset:0;display:grid;place-items:center;font:700 26px ui-monospace,monospace;color:#fff;text-shadow:0 1px 4px #000}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--red);margin-right:6px}.dot.on{background:var(--green)}
 @media(prefers-reduced-motion:reduce){.water{transition:none}}
+.pw{position:relative}.pw input{padding-right:46px}
+button.eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;color:var(--mute);padding:6px 8px;display:grid;place-items:center}
+button.eye:hover{color:var(--ink)}
 :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 </style>
 </head>
@@ -107,7 +110,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <form id="f">
     <label for="url">Secure WebSocket URL</label><input id="url" type="url" required placeholder="wss://xxxx.emqxsl.com:8084/mqtt">
     <label for="user">Username</label><input id="user" autocomplete="username">
-    <label for="pass">Password</label><input id="pass" type="password" autocomplete="current-password">
+    <label for="pass">Password</label>
+    <div class="pw"><input id="pass" type="password" autocomplete="current-password">
+      <button type="button" id="eye" class="eye" aria-label="Show password" aria-pressed="false"></button></div>
     <label for="tank">Tank name (as set on the receiver)</label><input id="tank" value="Tank_1" pattern="[A-Za-z0-9_\-]{1,32}" required>
     <div class="btns"><button id="bConn" type="submit">Connect</button><button id="bDisc" type="button" class="ghost" disabled>Disconnect</button></div>
   </form>
@@ -227,6 +232,18 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
   if(!confirm('Change '+t.split('/')[0].toLowerCase()+' mode to '+v+'?'+apWarn))return; if(!gap('modeMsg'))return;
   send(t,v,'modeMsg',t.split('/')[0]+' '+v+' sent to broker.'+(t.startsWith('Receiver')?' Waiting for the receiver to report its mode.':' It arrives at the next transmitter wake-up.')).catch(()=>{});
 });
+
+// Show / hide password toggle
+const EYE_ON='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.06-5.94M9.9 5.1A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
+$('eye').innerHTML=EYE_ON;
+$('eye').onclick=()=>{
+  const show=$('pass').type==='password';
+  $('pass').type=show?'text':'password';
+  $('eye').innerHTML=show?EYE_OFF:EYE_ON;
+  $('eye').setAttribute('aria-label',show?'Hide password':'Show password');
+  $('eye').setAttribute('aria-pressed',String(show));
+};
 
 $('f').addEventListener('submit',e=>{
   e.preventDefault();
